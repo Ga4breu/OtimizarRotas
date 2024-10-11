@@ -24,7 +24,7 @@ const Mapa = () => {
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
 
   const apiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-  console.log(apiKey)
+
 
   const onLoad = useCallback((map) => {
     mapRef.current = map;
