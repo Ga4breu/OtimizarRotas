@@ -58,10 +58,39 @@ const Mapa = () => {
       alert('Geolocation is not supported by your browser.');
     }
   };
+  const [apiCallCount, setApiCallCount] = useState(0);
+  const [lastApiCallTimestamp, setLastApiCallTimestamp] = useState(0);
+  
+  const MAX_API_CALLS = parseInt(3, 10);
+  const RATE_LIMIT_INTERVAL = parseInt(60000, 10);
+
+  const canMakeApiCall = () => {
+    const currentTime = Date.now();
+    const lastCallTimestamp = localStorage.getItem('lastApiCallTimestamp');
+    const callCount = parseInt(localStorage.getItem('apiCallCount') || 0, 10);
+
+    if (!lastCallTimestamp || currentTime - lastCallTimestamp > RATE_LIMIT_INTERVAL) {
+      // Reset count and timestamp if the interval has passed
+      localStorage.setItem('apiCallCount', '1');
+      localStorage.setItem('lastApiCallTimestamp', currentTime.toString());
+      return true;
+    } else if (callCount < MAX_API_CALLS) {
+      // Increment count if within the allowed interval
+      localStorage.setItem('apiCallCount', (callCount + 1).toString());
+      return true;
+    }
+
+    // Block the API call if limit is reached
+    return false;
+  };
 
   const handleOptimizeRoute = () => {
     const addressesArray = addresses.filter(address => address.trim() !== '');
 
+    if (!canMakeApiCall()) {
+      alert(`Cansou minha API, pode rodar dnv em 60 segundos.`);
+      return;
+    }
     if (addressesArray.length < 2) {
       alert('Por favor, insira pelo menos dois endereços.');
       return;
