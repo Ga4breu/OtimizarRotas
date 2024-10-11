@@ -58,6 +58,7 @@ const Mapa = () => {
       alert('Geolocation is not supported by your browser.');
     }
   };
+
   const [apiCallCount, setApiCallCount] = useState(0);
   const [lastApiCallTimestamp, setLastApiCallTimestamp] = useState(0);
   
@@ -97,7 +98,6 @@ const Mapa = () => {
     }
 
     const origin = addressesArray[0];
-    const waypoints = addressesArray.slice(1, -1);
 
     const distanceMatrixService = new window.google.maps.DistanceMatrixService();
 
@@ -117,17 +117,23 @@ const Mapa = () => {
             }
 
             const optimizedOrder = getOptimalOrder(distanceData);
-            const reorderedWaypoints = optimizedOrder.slice(1).map(index => ({
-              location: addressesArray[index],
+
+            // Reorder addressesArray according to optimizedOrder
+            const reorderedAddresses = optimizedOrder.map(index => addressesArray[index]);
+
+            // Prepare waypoints for DirectionsService
+            const waypoints = reorderedAddresses.slice(1, -1).map(location => ({
+              location: location,
             }));
 
             const directionsService = new window.google.maps.DirectionsService();
             directionsService.route(
               {
-                origin: addressesArray[optimizedOrder[0]],
-                destination: addressesArray[optimizedOrder[optimizedOrder.length - 1]],
-                waypoints: reorderedWaypoints,
-                travelMode: window.google.maps.TravelMode.DRIVING
+                origin: reorderedAddresses[0],
+                destination: reorderedAddresses[reorderedAddresses.length - 1],
+                waypoints: waypoints,
+                travelMode: window.google.maps.TravelMode.DRIVING,
+                optimizeWaypoints: false, // We have already optimized the route
               },
               (result, status) => {
                 if (status === window.google.maps.DirectionsStatus.OK) {
@@ -145,7 +151,7 @@ const Mapa = () => {
                     key: 'wp-origin'
                   });
 
-                  result.routes[0].legs.slice(0, -1).forEach((leg, i) => {
+                  result.routes[0].legs.forEach((leg, i) => {
                     markers.push({
                       location: leg.end_location,
                       label: {
@@ -167,9 +173,9 @@ const Mapa = () => {
                   setTotalDistance(totalDistance);
 
                   // Construct Google Maps URL
-                  const destination = addressesArray[optimizedOrder[optimizedOrder.length - 1]];
-                  const waypointsForUrl = optimizedOrder.slice(1, -1).map(index => addressesArray[index]).join('|');
-                  const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&waypoints=${encodeURIComponent(waypointsForUrl)}`;
+                  const destination = reorderedAddresses[reorderedAddresses.length - 1];
+                  const waypointsForUrl = reorderedAddresses.slice(1, -1).join('|');
+                  const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(reorderedAddresses[0])}&destination=${encodeURIComponent(destination)}&waypoints=${encodeURIComponent(waypointsForUrl)}`;
 
                   setGoogleMapsUrl(googleMapsUrl);
                 } else {
@@ -192,29 +198,75 @@ const Mapa = () => {
 
   const getOptimalOrder = (distanceData) => {
     const n = distanceData.length;
-    const visited = new Array(n).fill(false);
-    const order = [];
-    let currentIndex = 0;
-    visited[0] = true;
-    order.push(0);
 
-    for (let i = 1; i < n; i++) {
-      let nextIndex = -1;
-      let minDistance = Number.MAX_SAFE_INTEGER;
-
-      for (let j = 0; j < n; j++) {
-        if (!visited[j] && distanceData[currentIndex].elements[j].distance.value < minDistance) {
-          minDistance = distanceData[currentIndex].elements[j].distance.value;
-          nextIndex = j;
-        }
+    if (n <= 10) {
+      // Brute-force TSP solver
+      const indices = [];
+      for (let i = 1; i < n; i++) {
+        indices.push(i);
       }
 
-      visited[nextIndex] = true;
-      order.push(nextIndex);
-      currentIndex = nextIndex;
-    }
+      let minDistance = Number.MAX_SAFE_INTEGER;
+      let bestOrder = null;
 
-    return order;
+      const permute = (arr, l, r) => {
+        if (l === r) {
+          // Compute total distance for this permutation
+          let totalDistance = 0;
+          let prevIndex = 0; // Start from origin (index 0)
+          for (let i = 0; i < arr.length; i++) {
+            const currentIndex = arr[i];
+            totalDistance += distanceData[prevIndex].elements[currentIndex].distance.value;
+            prevIndex = currentIndex;
+          }
+          // Optionally, return to the start point (uncomment if needed)
+          // totalDistance += distanceData[prevIndex].elements[0].distance.value;
+
+          if (totalDistance < minDistance) {
+            minDistance = totalDistance;
+            bestOrder = [0].concat(arr.slice());
+          }
+        } else {
+          for (let i = l; i <= r; i++) {
+            [arr[l], arr[i]] = [arr[i], arr[l]]; // Swap
+            permute(arr, l + 1, r);
+            [arr[l], arr[i]] = [arr[i], arr[l]]; // Backtrack
+          }
+        }
+      };
+
+      permute(indices, 0, indices.length - 1);
+
+      return bestOrder;
+    } else {
+      // Use Nearest Neighbor heuristic (same as your current implementation)
+      const visited = new Array(n).fill(false);
+      const order = [];
+      let currentIndex = 0;
+      visited[0] = true;
+      order.push(0);
+
+      for (let i = 1; i < n; i++) {
+        let nextIndex = -1;
+        let minDistance = Number.MAX_SAFE_INTEGER;
+
+        for (let j = 0; j < n; j++) {
+          if (
+            !visited[j] &&
+            distanceData[currentIndex].elements[j].distance.value < minDistance
+          ) {
+            minDistance = distanceData[currentIndex].elements[j].distance.value;
+            nextIndex = j;
+          }
+        }
+
+        visited[nextIndex] = true;
+        order.push(nextIndex);
+        currentIndex = nextIndex;
+      }
+
+      return order;
+    }
   };
 
   const handleAddressChange = (index, value) => {
@@ -228,9 +280,9 @@ const Mapa = () => {
   };
 
   return (
-    <div className="flex flex-col md:flex-row md:h-[85vh] md:ml-[25%]">
-      <div className="md:w-1/2 p-4 ">
-        <div className="bg-gray-800 h-[400px] md:h-full">
+    <div className="flex flex-col md:flex-row md:min-h-[75vh] p-2 gap-8 mt-4 z-20 overflow-visible">
+      <div className=" items-center">
+        <div className="bg-gray-800 h-[40vh] md:w-[30vw] md:h-[80%] border-4 rounded-lg border-black">
           <LoadScript googleMapsApiKey={apiKey}>
             <GoogleMap
               mapContainerStyle={containerStyle}
@@ -268,7 +320,17 @@ const Mapa = () => {
             </GoogleMap>
           </LoadScript>
         </div>
+        <div className='mb-8'>
+        {googleMapsUrl && (
+          <button
+            className="bg-blue-500 text-white p-3 rounded-lg shadow-lg hover:bg-blue-600 mt-4"
+            onClick={() => window.open(googleMapsUrl, '_blank')}
+          >
+            Abrir Rota no Maps
+          </button>
+        )}</div>
       </div>
+      
       <div className="mt-[5%]">
         {addresses.map((address, index) => (
           <div key={index} className="mb-2 flex items-center">
@@ -277,7 +339,7 @@ const Mapa = () => {
               value={address}
               onChange={(e) => handleAddressChange(index, e.target.value)}
               placeholder={index === 0 ? "Início da Rota" : `Coloque o endereço ${index + 1}`}
-              className="w-64 p-2"
+              className="w-64 p-2 border-2 rounded-lg"
             />
             {index === 0 && (
               <button
@@ -289,16 +351,7 @@ const Mapa = () => {
             )}
           </div>
         ))}
-        <div className='mb-8'>
-        {googleMapsUrl && (
-          <button
-            className="bg-blue-500 text-white p-3 rounded-lg shadow-lg hover:bg-blue-600 mt-4"
-            onClick={() => window.open(googleMapsUrl, '_blank')}
-          >
-            Abrir Rota no Maps
-          </button>
-        )}</div>
-        <div className='flex flex-column gap-8 justify-center'>
+        <div className='flex flex-column gap-8 '>
           
           <button
             className="bg-green-500 text-white p-3 rounded-lg shadow-lg hover:bg-green-600"
