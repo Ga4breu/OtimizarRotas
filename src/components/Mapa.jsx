@@ -1,6 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { GoogleMap, LoadScript, DirectionsRenderer, Marker } from '@react-google-maps/api';
-import GpsFixedIcon from '@mui/icons-material/GpsFixed';
+import { GoogleMap, useJsApiLoader, DirectionsRenderer, Marker } from '@react-google-maps/api';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 
 const containerStyle = {
@@ -9,11 +8,14 @@ const containerStyle = {
 };
 
 const initialCenter = {
-  lat: -25.5469,  // Latitude of Foz do Iguaçu, Brazil
-  lng: -54.5882   // Longitude of Foz do Iguaçu, Brazil
+  lat: -25.5469,  // Latitude de Foz do Iguaçu, Brasil
+  lng: -54.5882   // Longitude de Foz do Iguaçu, Brasil
 };
 
-// Use the API key from the .env file
+// Defina o array libraries fora do componente
+const libraries = ['places'];
+
+// Use a API Key do arquivo .env
 const apiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
 
 const Mapa = () => {
@@ -21,11 +23,18 @@ const Mapa = () => {
   const [center, setCenter] = useState(initialCenter);
   const mapRef = useRef(null);
 
-  const [addresses, setAddresses] = useState(['', '', '']); // Three default empty addresses
+  const [addresses, setAddresses] = useState(['', '', '']); // Três endereços vazios por padrão
   const [directions, setDirections] = useState(null);
   const [waypointsMarkers, setWaypointsMarkers] = useState([]);
   const [totalDistance, setTotalDistance] = useState(null);
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
+
+  // Carrega o script do Google Maps
+  const { isLoaded, loadError } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: apiKey,
+    libraries: libraries,
+  });
 
   const onLoad = useCallback((map) => {
     mapRef.current = map;
@@ -35,7 +44,7 @@ const Mapa = () => {
     mapRef.current = null;
   }, []);
 
-  // Function to use current location
+  // Função para usar a localização atual
   const handleUseCurrentLocation = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((position) => {
@@ -51,37 +60,31 @@ const Mapa = () => {
           mapRef.current.setZoom(14);
         }
       }, (error) => {
-        console.error('Error fetching location:', error);
-        alert('Unable to fetch your current location.');
+        console.error('Erro ao obter a localização:', error);
+        alert('Não foi possível obter sua localização atual.');
       });
     } else {
-      alert('Geolocation is not supported by your browser.');
+      alert('Geolocalização não é suportada pelo seu navegador.');
     }
   };
 
+  // Limite de chamadas à API
   const [apiCallCount, setApiCallCount] = useState(0);
   const [lastApiCallTimestamp, setLastApiCallTimestamp] = useState(0);
-  
-  const MAX_API_CALLS = parseInt(3, 10);
-  const RATE_LIMIT_INTERVAL = parseInt(60000, 10);
+
+  const MAX_API_CALLS = 3;
+  const RATE_LIMIT_INTERVAL = 60000; // 60 segundos
 
   const canMakeApiCall = () => {
     const currentTime = Date.now();
-    const lastCallTimestamp = localStorage.getItem('lastApiCallTimestamp');
-    const callCount = parseInt(localStorage.getItem('apiCallCount') || 0, 10);
-
-    if (!lastCallTimestamp || currentTime - lastCallTimestamp > RATE_LIMIT_INTERVAL) {
-      // Reset count and timestamp if the interval has passed
-      localStorage.setItem('apiCallCount', '1');
-      localStorage.setItem('lastApiCallTimestamp', currentTime.toString());
+    if (currentTime - lastApiCallTimestamp > RATE_LIMIT_INTERVAL) {
+      setApiCallCount(1);
+      setLastApiCallTimestamp(currentTime);
       return true;
-    } else if (callCount < MAX_API_CALLS) {
-      // Increment count if within the allowed interval
-      localStorage.setItem('apiCallCount', (callCount + 1).toString());
+    } else if (apiCallCount < MAX_API_CALLS) {
+      setApiCallCount(apiCallCount + 1);
       return true;
     }
-
-    // Block the API call if limit is reached
     return false;
   };
 
@@ -113,15 +116,15 @@ const Mapa = () => {
             const distanceData = response.rows;
 
             if (!distanceData || distanceData.length === 0 || !distanceData[0].elements) {
-              throw new Error("Incomplete response from Distance Matrix API");
+              throw new Error("Resposta incompleta da API Distance Matrix");
             }
 
             const optimizedOrder = getOptimalOrder(distanceData);
 
-            // Reorder addressesArray according to optimizedOrder
+            // Reordenar addressesArray de acordo com optimizedOrder
             const reorderedAddresses = optimizedOrder.map(index => addressesArray[index]);
 
-            // Prepare waypoints for DirectionsService
+            // Preparar waypoints para DirectionsService
             const waypoints = reorderedAddresses.slice(1, -1).map(location => ({
               location: location,
             }));
@@ -133,7 +136,7 @@ const Mapa = () => {
                 destination: reorderedAddresses[reorderedAddresses.length - 1],
                 waypoints: waypoints,
                 travelMode: window.google.maps.TravelMode.DRIVING,
-                optimizeWaypoints: false, // We have already optimized the route
+                optimizeWaypoints: false, // Já otimizamos a rota
               },
               (result, status) => {
                 if (status === window.google.maps.DirectionsStatus.OK) {
@@ -169,27 +172,27 @@ const Mapa = () => {
                   result.routes[0].legs.forEach(leg => {
                     totalDistance += leg.distance.value;
                   });
-                  totalDistance /= 1000; // Convert to km
+                  totalDistance /= 1000; // Converter para km
                   setTotalDistance(totalDistance);
 
-                  // Construct Google Maps URL
+                  // Construir URL do Google Maps
                   const destination = reorderedAddresses[reorderedAddresses.length - 1];
                   const waypointsForUrl = reorderedAddresses.slice(1, -1).join('|');
                   const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(reorderedAddresses[0])}&destination=${encodeURIComponent(destination)}&waypoints=${encodeURIComponent(waypointsForUrl)}`;
 
                   setGoogleMapsUrl(googleMapsUrl);
                 } else {
-                  console.error(`Error fetching directions: ${status}`);
+                  console.error(`Erro ao obter direções: ${status}`);
                   alert('Houve um erro ao obter a rota. Por favor, tente novamente.');
                 }
               }
             );
           } catch (error) {
-            console.error('Error processing Distance Matrix response:', error);
+            console.error('Erro ao processar a resposta da Distance Matrix:', error);
             alert('Um ou mais dos endereços possui pouca informação. Adicione, por exemplo, a cidade, nome da rua ou número.');
           }
         } else {
-          console.error(`Distance Matrix request failed: ${status}`);
+          console.error(`Falha na solicitação Distance Matrix: ${status}`);
           alert('Falha ao calcular as distâncias. Verifique se todos os endereços estão corretos.');
         }
       }
@@ -200,7 +203,7 @@ const Mapa = () => {
     const n = distanceData.length;
 
     if (n <= 10) {
-      // Brute-force TSP solver
+      // Algoritmo de força bruta para TSP
       const indices = [];
       for (let i = 1; i < n; i++) {
         indices.push(i);
@@ -211,16 +214,14 @@ const Mapa = () => {
 
       const permute = (arr, l, r) => {
         if (l === r) {
-          // Compute total distance for this permutation
+          // Calcular a distância total para esta permutação
           let totalDistance = 0;
-          let prevIndex = 0; // Start from origin (index 0)
+          let prevIndex = 0; // Começa da origem (índice 0)
           for (let i = 0; i < arr.length; i++) {
             const currentIndex = arr[i];
             totalDistance += distanceData[prevIndex].elements[currentIndex].distance.value;
             prevIndex = currentIndex;
           }
-          // Optionally, return to the start point (uncomment if needed)
-          // totalDistance += distanceData[prevIndex].elements[0].distance.value;
 
           if (totalDistance < minDistance) {
             minDistance = totalDistance;
@@ -239,7 +240,7 @@ const Mapa = () => {
 
       return bestOrder;
     } else {
-      // Use Nearest Neighbor heuristic (same as your current implementation)
+      // Usa o algoritmo do vizinho mais próximo
       const visited = new Array(n).fill(false);
       const order = [];
       let currentIndex = 0;
@@ -279,11 +280,15 @@ const Mapa = () => {
     setAddresses([...addresses, '']);
   };
 
+  if (loadError) {
+    return <div>Erro ao carregar o Google Maps API</div>;
+  }
+
   return (
     <div className="flex flex-col md:flex-row md:min-h-[75vh] p-2 gap-8 mt-4 z-20 overflow-visible">
-      <div className=" items-center">
+      <div className="items-center">
         <div className="bg-gray-800 h-[40vh] md:w-[30vw] md:h-[80%] border-4 rounded-lg border-black">
-          <LoadScript googleMapsApiKey={apiKey}>
+          {isLoaded ? (
             <GoogleMap
               mapContainerStyle={containerStyle}
               center={center}
@@ -318,19 +323,22 @@ const Mapa = () => {
                 />
               ))}
             </GoogleMap>
-          </LoadScript>
+          ) : (
+            <div>Carregando...</div>
+          )}
         </div>
         <div className='mb-8'>
-        {googleMapsUrl && (
-          <button
-            className="bg-blue-500 text-white p-3 rounded-lg shadow-lg hover:bg-blue-600 mt-4"
-            onClick={() => window.open(googleMapsUrl, '_blank')}
-          >
-            Abrir Rota no Maps
-          </button>
-        )}</div>
+          {googleMapsUrl && (
+            <button
+              className="bg-blue-500 text-white p-3 rounded-lg shadow-lg hover:bg-blue-600 mt-4"
+              onClick={() => window.open(googleMapsUrl, '_blank')}
+            >
+              Abrir Rota no Maps
+            </button>
+          )}
+        </div>
       </div>
-      
+
       <div className="mt-[5%]">
         {addresses.map((address, index) => (
           <div key={index} className="mb-2 flex items-center">
@@ -346,13 +354,12 @@ const Mapa = () => {
                 className="bg-green-500 text-white ml-2 p-2 rounded-lg hover:bg-green-600"
                 onClick={handleUseCurrentLocation}
               >
-                <MyLocationIcon/>
+                <MyLocationIcon />
               </button>
             )}
           </div>
         ))}
         <div className='flex flex-column gap-8 '>
-          
           <button
             className="bg-green-500 text-white p-3 rounded-lg shadow-lg hover:bg-green-600"
             onClick={handleAddAddress}
@@ -374,6 +381,6 @@ const Mapa = () => {
       </div>
     </div>
   );
-}
+};
 
 export default Mapa;
